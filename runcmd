@@ -1,0 +1,107 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use POSIX qw(:sys_wait_h);
+use Getopt::Long;
+
+my $DEFAULT_PROCS = 10;
+my $MAX_PROCS = 100;
+
+print "\e[93m\e[1m";
+print <<EOF
++----------------------------------------------+
+                                          .___
+  _______ __ __  ____   ____   _____    __| _/
+  \\_  __ \\  |  \\\/    \\\_/ ___\\ /     \\  / __ | 
+   |  | \\\/  |  /   |  \\  \\\___|  Y Y  \\\/ /_/ | 
+   |__|  |____/|___|  /\\\___  >__|_|  /\\\____ | 
+                    \\\/     \\\/      \\\/      \\\/ 
+  
+    Tricky Troy's Run the Damn Scripts  v1.0
+    :: runs multiple commands from a file ::
+
++----------------------------------------------+
+EOF
+;
+print "\e[0m";
+
+$| = 1;
+
+my $args = usage();
+
+my @pids;
+my $cmd_count = 0;
+my $lines=0;
+
+print STDERR "Running $args->{num} concurrent commands, reading from ", filename(), "\n";
+my $total=$args->{num};
+
+
+open (FILE, $args->{file}) or die "Can't open file: $!";
+$lines++ while (<FILE>);
+close FILE;
+
+
+
+open my $fh, "$args->{file}" or die "Cannot open '$args->{file}'";
+while (!eof($fh)) {
+    while (!eof($fh) && @pids < $args->{num}) {
+	++$cmd_count;
+	if (chomp(my $cmd = <$fh>)) {
+	    if (my $pid = fork()) {
+		push @pids, $pid;
+	    } else {
+		print "\n\e[93m==================================================\e[0m\n  \e[96m\e[1m$cmd_count of $lines\e[0m\n\e[93m  COMMAND\e[0m: \e[91m\e[1m$cmd\e[0m\n  \e[93mPID\e[0m: $$\n  \e[93mSTART\e[0m: ", scalar(localtime), "\n\e[93m==================================================\e[0m\n";
+		#print $cmd_count, " | \e[91mCMD:\e[0m $cmd | \e[91mPID:\e[0m $$ | \e[91mSTART:\e[0m ", scalar(localtime), "\n";
+		exec($cmd);
+	    }
+	}
+    }
+
+    if (my $finished = waitpid(-1, WNOHANG)) {
+	@pids = grep { $_ != $finished } @pids;
+    }
+}
+close $fh;
+
+waitpid $_, 0 for @pids;
+print STDERR "Ran $cmd_count commands read from ", filename(), "\n";
+
+sub filename {
+    if ($args->{file} eq '-') {
+	return -p STDIN ? "piped process" : "STDIN";
+    }
+    return $args->{file};
+}
+
+sub usage {
+    my $args = {
+	num => $DEFAULT_PROCS,
+
+	# If we're being fed piped input, default -file to STDIN
+	-p STDIN ? ( file => '-' ) : (),
+    };
+    
+    my $status = GetOptions($args,
+			    'file|f=s',
+			    'num|n=i',
+			    'help|h');
+
+    if (!$status || !$args->{file} || $args->{help} || $args->{num} > $MAX_PROCS) {
+        print<<USAGE;
+
+ Usage:
+    -f -file : File with commands to run
+                (reads from piped process, or '-' to read from STDIN)
+    -n -num  : Number of concurrent commands to run
+                (default $DEFAULT_PROCS, maximum $MAX_PROCS)
+    -h -help : Display this help page
+
+USAGE
+
+	exit;
+    }
+
+    return $args;
+}
